@@ -1,174 +1,270 @@
 from pathlib import Path
-from collections import defaultdict
 import csv
+from collections import defaultdict
 
 
 DATA_DIR = Path(__file__).resolve().parents[2]
 
-INPUT_FILE = DATA_DIR / "processed" / "player_match_stats.csv"
-OUTPUT_FILE = DATA_DIR / "processed" / "player_season_stats.csv"
+INPUT_FILE = (
+        DATA_DIR
+        / "processed"
+        / "player_match_stats.csv"
+)
+
+OUTPUT_FILE = (
+        DATA_DIR
+        / "processed"
+        / "player_season_stats.csv"
+)
+
+
+def safe_strike_rate(runs, balls):
+    if balls == 0:
+        return 0.0
+
+    return round(
+        (runs / balls) * 100,
+        2
+    )
+
+
+def safe_average(runs, dismissals):
+    if dismissals == 0:
+        return 0.0
+
+    return round(
+        runs / dismissals,
+        2
+    )
+
+
+def safe_economy(runs_conceded, balls_bowled):
+    if balls_bowled == 0:
+        return 0.0
+
+    return round(
+        (runs_conceded / balls_bowled) * 6,
+        2
+    )
 
 
 def build_player_season_stats():
 
-    aggregations = {}
+    # ========================================================
+    # LOAD MATCH STATS
+    # ========================================================
 
     with open(
             INPUT_FILE,
             "r",
-            encoding="utf-8"
+            encoding="utf-8",
+            newline=""
     ) as file:
 
         reader = csv.DictReader(file)
 
-        for row in reader:
+        rows = list(reader)
 
-            player_id = row["cricsheet_player_id"]
-            season = row["season"]
+    # ========================================================
+    # AGGREGATION
+    # ========================================================
 
-            key = (player_id, season)
+    season_stats = defaultdict(
+        lambda: {
+            "player_name": "",
+            "season": "",
 
-            if key not in aggregations:
+            "matches": 0,
 
-                aggregations[key] = {
-                    "cricsheet_player_id": player_id,
-                    "player_name": row["player_name"],
-                    "season": season,
+            # Batting
+            "batting_innings": 0,
+            "runs": 0,
+            "balls_faced": 0,
+            "fours": 0,
+            "sixes": 0,
+            "dismissals": 0,
 
-                    "matches": 0,
+            # Bowling
+            "bowling_innings": 0,
+            "runs_conceded": 0,
+            "balls_bowled": 0,
+            "wickets": 0,
+            "maidens": 0,
 
-                    "batting_innings": 0,
-                    "runs": 0,
-                    "balls_faced": 0,
-                    "fours": 0,
-                    "sixes": 0,
+            # Fielding
+            "catches": 0,
+            "stumpings": 0,
+            "run_outs": 0,
 
-                    "bowling_innings": 0,
-                    "runs_conceded": 0,
-                    "balls_bowled": 0,
-                    "wickets": 0,
-                    "maidens": 0,
+            # Internal tracking
+            "_matches": set(),
+        }
+    )
 
-                    "catches": 0,
-                    "stumpings": 0,
-                    "run_outs": 0,
-                }
+    # ========================================================
+    # PROCESS MATCH RECORDS
+    # ========================================================
 
-            stats = aggregations[key]
+    for row in rows:
 
-            stats["matches"] += 1
+        player_id = row[
+            "cricsheet_player_id"
+        ]
 
-            stats["batting_innings"] += int(
-                row["batting_innings"]
-            )
+        season = row[
+            "season"
+        ]
 
-            stats["runs"] += int(row["runs"])
-            stats["balls_faced"] += int(
-                row["balls_faced"]
-            )
+        key = (
+            player_id,
+            season
+        )
 
-            stats["fours"] += int(row["fours"])
-            stats["sixes"] += int(row["sixes"])
+        stats = season_stats[key]
 
-            stats["bowling_innings"] += int(
-                row["bowling_innings"]
-            )
+        stats["player_name"] = row[
+            "player_name"
+        ]
 
-            stats["runs_conceded"] += int(
-                row["runs_conceded"]
-            )
+        stats["season"] = season
 
-            stats["balls_bowled"] += int(
-                row["balls_bowled"]
-            )
+        # ----------------------------------------------------
+        # Match participation
+        # ----------------------------------------------------
 
-            stats["wickets"] += int(
-                row["wickets"]
-            )
+        stats["_matches"].add(
+            row["source_match_id"]
+        )
 
-            stats["maidens"] += int(
-                row["maidens"]
-            )
+        # ----------------------------------------------------
+        # Batting
+        # ----------------------------------------------------
 
-            stats["catches"] += int(
-                row["catches"]
-            )
+        stats["batting_innings"] += int(
+            row["batting_innings"]
+        )
 
-            stats["stumpings"] += int(
-                row["stumpings"]
-            )
+        stats["runs"] += int(
+            row["runs"]
+        )
 
-            stats["run_outs"] += int(
-                row["run_outs"]
-            )
+        stats["balls_faced"] += int(
+            row["balls_faced"]
+        )
+
+        stats["fours"] += int(
+            row["fours"]
+        )
+
+        stats["sixes"] += int(
+            row["sixes"]
+        )
+
+        stats["dismissals"] += int(
+            row["dismissals"]
+        )
+
+        # ----------------------------------------------------
+        # Bowling
+        # ----------------------------------------------------
+
+        stats["bowling_innings"] += int(
+            row["bowling_innings"]
+        )
+
+        stats["runs_conceded"] += int(
+            row["runs_conceded"]
+        )
+
+        stats["balls_bowled"] += int(
+            row["balls_bowled"]
+        )
+
+        stats["wickets"] += int(
+            row["wickets"]
+        )
+
+        stats["maidens"] += int(
+            row["maidens"]
+        )
+
+        # ----------------------------------------------------
+        # Fielding
+        # ----------------------------------------------------
+
+        stats["catches"] += int(
+            row["catches"]
+        )
+
+        stats["stumpings"] += int(
+            row["stumpings"]
+        )
+
+        stats["run_outs"] += int(
+            row["run_outs"]
+        )
+
+    # ========================================================
+    # BUILD OUTPUT
+    # ========================================================
 
     records = []
 
-    for stats in aggregations.values():
+    for (
+            player_id,
+            season
+    ), stats in sorted(
+        season_stats.items(),
+        key=lambda item: (
+                item[0][1],
+                item[1]["player_name"]
+        )
+    ):
 
         runs = stats["runs"]
-        balls_faced = stats["balls_faced"]
 
-        runs_conceded = stats["runs_conceded"]
-        balls_bowled = stats["balls_bowled"]
+        balls_faced = stats[
+            "balls_faced"
+        ]
 
-        # -----------------------------------------------------
-        # Strike rate
-        # -----------------------------------------------------
+        dismissals = stats[
+            "dismissals"
+        ]
 
-        if balls_faced > 0:
+        runs_conceded = stats[
+            "runs_conceded"
+        ]
 
-            strike_rate = (
-                                  runs / balls_faced
-                          ) * 100
-
-        else:
-
-            strike_rate = 0
-
-        # -----------------------------------------------------
-        # Economy
-        # -----------------------------------------------------
-
-        if balls_bowled > 0:
-
-            economy = (
-                              runs_conceded * 6
-                      ) / balls_bowled
-
-        else:
-
-            economy = 0
-
-        # -----------------------------------------------------
-        # Batting average
-        #
-        # We don't yet have dismissals in our statistics
-        # table, so we deliberately do NOT calculate it here.
-        # -----------------------------------------------------
+        balls_bowled = stats[
+            "balls_bowled"
+        ]
 
         records.append({
 
             "cricsheet_player_id":
-                stats["cricsheet_player_id"],
+                player_id,
 
             "player_name":
                 stats["player_name"],
 
             "season":
-                stats["season"],
+                season,
 
             "matches":
-                stats["matches"],
+                len(stats["_matches"]),
+
+            # ------------------------------------------------
+            # Batting
+            # ------------------------------------------------
 
             "batting_innings":
                 stats["batting_innings"],
 
             "runs":
-                stats["runs"],
+                runs,
 
             "balls_faced":
-                stats["balls_faced"],
+                balls_faced,
 
             "fours":
                 stats["fours"],
@@ -176,17 +272,33 @@ def build_player_season_stats():
             "sixes":
                 stats["sixes"],
 
+            "dismissals":
+                dismissals,
+
             "strike_rate":
-                round(strike_rate, 2),
+                safe_strike_rate(
+                    runs,
+                    balls_faced
+                ),
+
+            "batting_average":
+                safe_average(
+                    runs,
+                    dismissals
+                ),
+
+            # ------------------------------------------------
+            # Bowling
+            # ------------------------------------------------
 
             "bowling_innings":
                 stats["bowling_innings"],
 
             "runs_conceded":
-                stats["runs_conceded"],
+                runs_conceded,
 
             "balls_bowled":
-                stats["balls_bowled"],
+                balls_bowled,
 
             "wickets":
                 stats["wickets"],
@@ -195,7 +307,14 @@ def build_player_season_stats():
                 stats["maidens"],
 
             "economy":
-                round(economy, 2),
+                safe_economy(
+                    runs_conceded,
+                    balls_bowled
+                ),
+
+            # ------------------------------------------------
+            # Fielding
+            # ------------------------------------------------
 
             "catches":
                 stats["catches"],
@@ -207,12 +326,9 @@ def build_player_season_stats():
                 stats["run_outs"],
         })
 
-    records.sort(
-        key=lambda row: (
-            row["season"],
-            row["player_name"]
-        )
-    )
+    # ========================================================
+    # WRITE CSV
+    # ========================================================
 
     fieldnames = [
         "cricsheet_player_id",
@@ -221,13 +337,17 @@ def build_player_season_stats():
 
         "matches",
 
+        # Batting
         "batting_innings",
         "runs",
         "balls_faced",
         "fours",
         "sixes",
+        "dismissals",
         "strike_rate",
+        "batting_average",
 
+        # Bowling
         "bowling_innings",
         "runs_conceded",
         "balls_bowled",
@@ -235,6 +355,7 @@ def build_player_season_stats():
         "maidens",
         "economy",
 
+        # Fielding
         "catches",
         "stumpings",
         "run_outs",
@@ -253,7 +374,12 @@ def build_player_season_stats():
         )
 
         writer.writeheader()
+
         writer.writerows(records)
+
+    # ========================================================
+    # OUTPUT
+    # ========================================================
 
     print("\n" + "=" * 70)
     print("PLAYER-SEASON STATISTICS GENERATED")
@@ -264,7 +390,9 @@ def build_player_season_stats():
         f"{len(records)}"
     )
 
-    print(f"Output: {OUTPUT_FILE}")
+    print(
+        f"Output: {OUTPUT_FILE}"
+    )
 
 
 if __name__ == "__main__":

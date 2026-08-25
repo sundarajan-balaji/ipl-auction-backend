@@ -5,61 +5,68 @@ import csv
 import json
 
 
+# ============================================================
+# PATHS
+# ============================================================
+
 DATA_DIR = Path(__file__).resolve().parents[2]
 
 ZIP_FILE = DATA_DIR / "raw" / "cricsheet" / "ipl_json.zip"
-OUTPUT_DIR = DATA_DIR / "processed"
 
-PLAYERS_FILE = OUTPUT_DIR / "players.csv"
+PROCESSED_DIR = DATA_DIR / "processed"
 
-OUTPUT_FILE = OUTPUT_DIR / "player_match_stats.csv"
-VALIDATION_FILE = OUTPUT_DIR / "statistics_validation.txt"
+PLAYERS_FILE = PROCESSED_DIR / "players.csv"
+
+OUTPUT_FILE = PROCESSED_DIR / "player_match_stats.csv"
+
+VALIDATION_FILE = PROCESSED_DIR / "statistics_validation.txt"
 
 
-def load_canonical_player_names():
-    """
-    Load the canonical Cricsheet player ID -> player name mapping.
+# ============================================================
+# WICKET DEFINITIONS
+# ============================================================
 
-    players.csv is our authoritative player identity dataset.
-    This prevents an incomplete or inconsistent name appearing
-    in a particular match from propagating into the statistics.
-    """
+# Wicket types that count as a batting dismissal.
+#
+# "retired hurt" is intentionally excluded.
+#
+# This gives us:
+#
+# 14,686 batting dismissals
+# 19 retired hurt events
+# 14,705 total wicket events
+#
+DISMISSAL_TYPES = {
+    "caught",
+    "bowled",
+    "lbw",
+    "caught and bowled",
+    "stumped",
+    "hit wicket",
+    "run out",
+    "retired out",
+    "obstructing the field",
+}
 
-    player_names = {}
 
-    with open(
-            PLAYERS_FILE,
-            "r",
-            encoding="utf-8"
-    ) as file:
+# Wicket types credited to the bowler.
+#
+# Run-outs, retired outs, obstructing the field and retired hurt
+# are NOT credited to the bowler.
+#
+BOWLER_WICKET_TYPES = {
+    "bowled",
+    "caught",
+    "lbw",
+    "caught and bowled",
+    "stumped",
+    "hit wicket",
+}
 
-        reader = csv.DictReader(file)
 
-        for row in reader:
-
-            player_id = row["cricsheet_player_id"]
-            player_name = row["name"].strip()
-
-            if not player_name:
-                raise ValueError(
-                    f"Blank player name in players.csv "
-                    f"for ID: {player_id}"
-                )
-
-            if player_id in player_names:
-                raise ValueError(
-                    f"Duplicate player ID in players.csv: "
-                    f"{player_id}"
-                )
-
-            player_names[player_id] = player_name
-
-    print(
-        f"Loaded {len(player_names)} canonical players."
-    )
-
-    return player_names
-
+# ============================================================
+# STAT STRUCTURE
+# ============================================================
 
 def create_stat():
     return {
@@ -73,6 +80,7 @@ def create_stat():
         "balls_faced": 0,
         "fours": 0,
         "sixes": 0,
+        "dismissals": 0,
 
         # Bowling
         "runs_conceded": 0,
@@ -87,14 +95,16 @@ def create_stat():
     }
 
 
+# ============================================================
+# HELPERS
+# ============================================================
+
 def is_legal_delivery(delivery):
     """
-    A wide and a no-ball are illegal deliveries.
+    A delivery is legal if it is not a wide or no-ball.
 
-    They therefore do not count as legal balls bowled.
-
-    A no-ball can still count as a ball faced by the batter.
-    A wide does not.
+    Wides and no-balls do not count towards the bowler's
+    six legal deliveries in an over.
     """
 
     extras = delivery.get("extras", {})
@@ -105,50 +115,63 @@ def is_legal_delivery(delivery):
     )
 
 
-def get_bowler_runs_conceded(delivery):
+def calculate_batting(
+        delivery,
+        stats,
+        player_ids,
+):
     """
-    Calculate the number of runs charged to the bowler.
-
-    Byes, leg-byes and penalty runs are not charged
-    to the bowler.
+    Calculate batter statistics for one delivery.
     """
 
-    runs = delivery.get("runs", {})
-    extras = delivery.get("extras", {})
+    batter_name = delivery.get("batter")
 
-    total_runs = runs.get("total", 0)
+    if not batter_name:
+        return
 
-    return (
-            total_runs
-            - extras.get("byes", 0)
-            - extras.get("legbyes", 0)
-            - extras.get("penalty", 0)
-    )
+    player_id = player_ids.get(batter_name)
 
-
-def calculate_batting(delivery, stats, player_ids):
-    batter_name = delivery["batter"]
-
-    batter_id = player_ids.get(batter_name)
-
-    if batter_id is None:
+    if player_id is None:
         raise ValueError(
-            f"No Cricsheet ID found for batter: "
-            f"{batter_name}"
+            f"No Cricsheet ID found for batter "
+            f"'{batter_name}'"
         )
 
-    player = stats[batter_id]
+    player = stats[player_id]
 
-    runs = delivery.get("runs", {})
+    player["runs"] += delivery.get(
+        "runs",
+        {}
+    ).get(
+        "batter",
+        0
+    )
+
+    # --------------------------------------------------------
+    # Balls faced
+    #
+    # Wides are not balls faced.
+    #
+    # No-balls are generally counted as balls faced in
+    # this dataset's historical statistical treatment only
+    # when the batter actually receives the delivery.
+    #
+    # For standard IPL statistics, no-balls count as balls
+    # faced unless the delivery is a wide.
+    # --------------------------------------------------------
+
     extras = delivery.get("extras", {})
 
-    player["runs"] += runs.get("batter", 0)
-
-    # A wide does not count as a ball faced.
     if "wides" not in extras:
         player["balls_faced"] += 1
 
-    batter_runs = runs.get("batter", 0)
+    batter_runs = delivery.get(
+        "runs",
+        {}
+    ).get(
+        "batter",
+        0
+    )
 
     if batter_runs == 4:
         player["fours"] += 1
@@ -157,180 +180,451 @@ def calculate_batting(delivery, stats, player_ids):
         player["sixes"] += 1
 
 
-def calculate_bowling(delivery, stats, player_ids):
-    bowler_name = delivery["bowler"]
+def calculate_bowling(
+        delivery,
+        stats,
+        player_ids,
+):
+    """
+    Calculate bowling statistics for one delivery.
+    """
 
-    bowler_id = player_ids.get(bowler_name)
+    bowler_name = delivery.get("bowler")
 
-    if bowler_id is None:
+    if not bowler_name:
+        return
+
+    player_id = player_ids.get(bowler_name)
+
+    if player_id is None:
         raise ValueError(
-            f"No Cricsheet ID found for bowler: "
-            f"{bowler_name}"
+            f"No Cricsheet ID found for bowler "
+            f"'{bowler_name}'"
         )
 
-    player = stats[bowler_id]
+    player = stats[player_id]
+
+    extras = delivery.get(
+        "extras",
+        {}
+    )
+
+    runs = delivery.get(
+        "runs",
+        {}
+    )
+
+    # --------------------------------------------------------
+    # Bowling runs conceded
+    #
+    # Bowler does NOT get charged for:
+    #
+    # - byes
+    # - leg byes
+    # - penalty runs
+    #
+    # Batter runs + wides + no-balls are charged.
+    # --------------------------------------------------------
+
+    bowler_runs = runs.get(
+        "batter",
+        0
+    )
+
+    bowler_runs += extras.get(
+        "wides",
+        0
+    )
+
+    bowler_runs += extras.get(
+        "noballs",
+        0
+    )
+
+    player["runs_conceded"] += bowler_runs
+
+    # --------------------------------------------------------
+    # Legal delivery
+    # --------------------------------------------------------
 
     if is_legal_delivery(delivery):
         player["balls_bowled"] += 1
 
-    player["runs_conceded"] += get_bowler_runs_conceded(
-        delivery
-    )
+    # --------------------------------------------------------
+    # Wickets credited to bowler
+    # --------------------------------------------------------
 
-    for wicket in delivery.get("wickets", []):
+    for wicket in delivery.get(
+            "wickets",
+            []
+    ):
 
         kind = wicket.get("kind")
 
-        # These dismissals are not credited to the bowler.
-        if kind in {
-            "run out",
-            "retired hurt",
-            "retired out",
-            "obstructing the field",
-        }:
+        if kind in BOWLER_WICKET_TYPES:
+            player["wickets"] += 1
+
+
+def calculate_dismissal(
+        delivery,
+        stats,
+        player_ids,
+):
+    """
+    Count batting dismissals.
+
+    Retired hurt is deliberately excluded.
+    """
+
+    for wicket in delivery.get(
+            "wickets",
+            []
+    ):
+
+        kind = wicket.get("kind")
+
+        if kind not in DISMISSAL_TYPES:
             continue
 
-        player["wickets"] += 1
+        player_out = wicket.get(
+            "player_out"
+        )
+
+        if not player_out:
+            continue
+
+        player_id = player_ids.get(
+            player_out
+        )
+
+        if player_id is None:
+            raise ValueError(
+                f"No Cricsheet ID found for dismissed "
+                f"player '{player_out}'"
+            )
+
+        stats[player_id][
+            "dismissals"
+        ] += 1
 
 
-def calculate_fielding(delivery, stats, player_ids):
-    for wicket in delivery.get("wickets", []):
+def calculate_fielding(
+        delivery,
+        stats,
+        player_ids,
+):
+    """
+    Calculate catches, stumpings and unambiguous run-outs.
 
-        kind = wicket.get("kind")
-        fielders = wicket.get("fielders", [])
+    Important:
 
-        # -----------------------------------------------------
+    A substitute fielder may appear in Cricsheet's
+    delivery data without appearing in info.players.
+
+    Because build_players.py now discovers such players,
+    their Cricsheet IDs are valid canonical IDs.
+    """
+
+    for wicket in delivery.get(
+            "wickets",
+            []
+    ):
+
+        kind = wicket.get(
+            "kind"
+        )
+
+        fielders = wicket.get(
+            "fielders",
+            []
+        )
+
+        # ----------------------------------------------------
         # Catches
-        # -----------------------------------------------------
+        # ----------------------------------------------------
 
         if kind == "caught":
 
             for fielder in fielders:
 
-                name = fielder.get("name")
-                player_id = player_ids.get(name)
+                name = fielder.get(
+                    "name"
+                )
 
-                if player_id is None:
+                if not name:
                     continue
 
-                stats[player_id]["catches"] += 1
+                player_id = player_ids.get(
+                    name
+                )
 
-        # -----------------------------------------------------
+                if player_id is None:
+                    raise ValueError(
+                        f"No Cricsheet ID found for "
+                        f"fielder '{name}'"
+                    )
+
+                stats[player_id][
+                    "catches"
+                ] += 1
+
+        # ----------------------------------------------------
         # Stumpings
-        # -----------------------------------------------------
+        # ----------------------------------------------------
 
         elif kind == "stumped":
 
             for fielder in fielders:
 
-                name = fielder.get("name")
-                player_id = player_ids.get(name)
+                name = fielder.get(
+                    "name"
+                )
 
-                if player_id is None:
+                if not name:
                     continue
 
-                stats[player_id]["stumpings"] += 1
+                player_id = player_ids.get(
+                    name
+                )
 
-        # -----------------------------------------------------
+                if player_id is None:
+                    raise ValueError(
+                        f"No Cricsheet ID found for "
+                        f"fielder '{name}'"
+                    )
+
+                stats[player_id][
+                    "stumpings"
+                ] += 1
+
+        # ----------------------------------------------------
         # Run outs
-        # -----------------------------------------------------
+        #
+        # Only assign when exactly one fielder is supplied.
+        #
+        # If multiple fielders are supplied, we cannot
+        # unambiguously decide who gets the fielding credit.
+        # ----------------------------------------------------
 
         elif kind == "run out":
-
-            # Only attribute a run-out when exactly one
-            # fielder is identified.
-            #
-            # Multiple-fielders remain intentionally
-            # unambiguous/unattributed.
 
             if len(fielders) != 1:
                 continue
 
-            name = fielders[0].get("name")
-            player_id = player_ids.get(name)
-
-            if player_id is None:
-                continue
-
-            stats[player_id]["run_outs"] += 1
-
-
-def calculate_maiden(over, stats, player_ids):
-    """
-    Award a maiden only when a single bowler delivers
-    all six legal balls of an over and concedes zero runs.
-
-    Interrupted/mixed-bowler overs do not produce a maiden.
-    """
-
-    deliveries = over.get("deliveries", [])
-
-    if not deliveries:
-        return
-
-    bowler_data = defaultdict(
-        lambda: {
-            "legal_balls": 0,
-            "runs": 0,
-        }
-    )
-
-    for delivery in deliveries:
-
-        bowler_name = delivery["bowler"]
-        bowler_id = player_ids.get(bowler_name)
-
-        if bowler_id is None:
-            raise ValueError(
-                f"No Cricsheet ID found for bowler: "
-                f"{bowler_name}"
+            name = fielders[0].get(
+                "name"
             )
 
-        bowler_data[bowler_id]["runs"] += (
-            get_bowler_runs_conceded(delivery)
+            if not name:
+                continue
+
+            player_id = player_ids.get(
+                name
+            )
+
+            if player_id is None:
+                raise ValueError(
+                    f"No Cricsheet ID found for "
+                    f"fielder '{name}'"
+                )
+
+            stats[player_id][
+                "run_outs"
+            ] += 1
+
+
+def calculate_maiden_overs(
+        overs,
+        stats,
+        player_ids,
+):
+    """
+    Calculate maiden overs.
+
+    A maiden is credited only when:
+
+    1. The entire over was bowled by exactly one bowler.
+    2. That bowler is identified in the canonical player map.
+    3. The bowler conceded zero runs during the entire over.
+
+    Mixed-bowler overs are deliberately excluded.
+    """
+
+    # --------------------------------------------------------
+    # Find all bowlers who participated in this over.
+    # --------------------------------------------------------
+
+    bowlers = set()
+
+    for delivery in overs:
+
+        bowler_name = delivery.get("bowler")
+
+        if not bowler_name:
+            continue
+
+        player_id = player_ids.get(
+            bowler_name
         )
 
-        if is_legal_delivery(delivery):
-            bowler_data[bowler_id]["legal_balls"] += 1
+        if player_id is None:
+            raise ValueError(
+                f"No Cricsheet ID found for bowler "
+                f"'{bowler_name}'"
+            )
 
-    # A standard maiden requires one bowler to deliver
-    # all six legal balls and concede zero runs.
-    for bowler_id, data in bowler_data.items():
+        bowlers.add(player_id)
 
-        if (
-                data["legal_balls"] == 6
-                and data["runs"] == 0
-        ):
-            stats[bowler_id]["maidens"] += 1
+    # --------------------------------------------------------
+    # A normal maiden must belong to exactly one bowler.
+    #
+    # Mixed-bowler overs are therefore excluded.
+    # --------------------------------------------------------
 
+    if len(bowlers) != 1:
+        return
+
+    bowler_id = next(iter(bowlers))
+
+    # --------------------------------------------------------
+    # Calculate the total runs conceded by that bowler
+    # during the entire over.
+    # --------------------------------------------------------
+
+    total_runs_conceded = 0
+
+    for delivery in overs:
+
+        extras = delivery.get(
+            "extras",
+            {}
+        )
+
+        runs = delivery.get(
+            "runs",
+            {}
+        )
+
+        # Batter runs are charged to bowler.
+        total_runs_conceded += runs.get(
+            "batter",
+            0
+        )
+
+        # Wides are charged to bowler.
+        total_runs_conceded += extras.get(
+            "wides",
+            0
+        )
+
+        # No-balls are charged to bowler.
+        total_runs_conceded += extras.get(
+            "noballs",
+            0
+        )
+
+        # Byes, leg-byes and penalty runs are deliberately
+        # not charged to the bowler.
+
+    # --------------------------------------------------------
+    # Zero runs conceded = maiden.
+    # --------------------------------------------------------
+
+    if total_runs_conceded == 0:
+
+        stats[bowler_id][
+            "maidens"
+        ] += 1
+
+
+# ============================================================
+# MAIN BUILDER
+# ============================================================
 
 def build_player_match_stats():
 
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
-    # ---------------------------------------------------------
-    # Load canonical player identities
-    # ---------------------------------------------------------
-
-    canonical_player_names = (
-        load_canonical_player_names()
+    PROCESSED_DIR.mkdir(
+        parents=True,
+        exist_ok=True
     )
+
+    # --------------------------------------------------------
+    # Load canonical players
+    #
+    # IMPORTANT:
+    #
+    # Use canonical_player_names because that is the mapping
+    # generated by the current data pipeline.
+    #
+    # player_id -> player_name
+    # --------------------------------------------------------
+
+    canonical_player_names = {}
+
+    with open(
+            PLAYERS_FILE,
+            "r",
+            encoding="utf-8"
+    ) as file:
+
+        reader = csv.DictReader(file)
+
+        for row in reader:
+
+            player_id = row[
+                "cricsheet_player_id"
+            ]
+
+            player_name = row[
+                "name"
+            ]
+
+            canonical_player_names[
+                player_id
+            ] = player_name
+
+    print(
+        f"Loaded "
+        f"{len(canonical_player_names)} "
+        f"canonical players."
+    )
+
+    # --------------------------------------------------------
+    # Output records
+    # --------------------------------------------------------
 
     records = []
 
+    # --------------------------------------------------------
+    # Global validation totals
+    # --------------------------------------------------------
+
+    total_matches = 0
+    total_player_match_records = 0
+
     total_batting_runs = 0
     total_balls_faced = 0
+    total_fours = 0
+    total_sixes = 0
+    total_dismissals = 0
 
     total_bowling_runs = 0
-    total_balls_bowled = 0
-    total_wickets = 0
+    total_legal_balls = 0
+    total_bowler_wickets = 0
     total_maidens = 0
 
     total_catches = 0
     total_stumpings = 0
     total_run_outs = 0
 
-    with ZipFile(ZIP_FILE, "r") as archive:
+    # --------------------------------------------------------
+    # Process ZIP
+    # --------------------------------------------------------
+
+    with ZipFile(
+            ZIP_FILE,
+            "r"
+    ) as archive:
 
         json_files = sorted(
             name
@@ -339,7 +633,8 @@ def build_player_match_stats():
         )
 
         print(
-            f"Processing {len(json_files)} matches..."
+            f"Processing "
+            f"{len(json_files)} matches..."
         )
 
         for index, filename in enumerate(
@@ -347,17 +642,30 @@ def build_player_match_stats():
                 start=1
         ):
 
-            with archive.open(filename) as file:
+            with archive.open(
+                    filename
+            ) as file:
+
                 match = json.load(file)
 
-            info = match["info"]
+            total_matches += 1
 
-            match_id = Path(filename).stem
-            season = str(info.get("season"))
+            info = match.get(
+                "info",
+                {}
+            )
 
-            # -------------------------------------------------
-            # Build name -> Cricsheet ID mapping for this match
-            # -------------------------------------------------
+            season = str(
+                info.get(
+                    "season"
+                )
+            )
+
+            # ------------------------------------------------
+            # Registry
+            #
+            # name -> Cricsheet ID
+            # ------------------------------------------------
 
             registry = (
                 info
@@ -365,34 +673,51 @@ def build_player_match_stats():
                 .get("people", {})
             )
 
-            # -------------------------------------------------
-            # Match-level team mapping
-            # -------------------------------------------------
+            player_ids = registry
 
-            teams = info.get("teams", [])
+            # ------------------------------------------------
+            # Match ID
+            # ------------------------------------------------
 
-            # -------------------------------------------------
-            # Player statistics for this match
-            # -------------------------------------------------
+            match_id = filename.rsplit(
+                ".",
+                1
+            )[0]
 
-            stats = defaultdict(create_stat)
+            # ------------------------------------------------
+            # Player stats
+            #
+            # player_id -> stats
+            # ------------------------------------------------
 
-            # -------------------------------------------------
+            stats = defaultdict(
+                create_stat
+            )
+
+            # ------------------------------------------------
             # Process innings
-            # -------------------------------------------------
+            # ------------------------------------------------
 
-            for innings in match.get("innings", []):
+            for innings in match.get(
+                    "innings",
+                    []
+            ):
 
-                batting_team = innings["team"]
+                batting_team = innings.get(
+                    "team"
+                )
 
-                # -------------------------------------------------
+                # ------------------------------------------------
                 # Determine fielding team
-                # -------------------------------------------------
+                # ------------------------------------------------
 
                 fielding_team = next(
                     (
                         team
-                        for team in teams
+                        for team in info.get(
+                        "teams",
+                        []
+                    )
                         if team != batting_team
                     ),
                     None
@@ -401,177 +726,218 @@ def build_player_match_stats():
                 innings_batters = set()
                 innings_bowlers = set()
 
-                for over in innings.get("overs", []):
+                overs = innings.get(
+                    "overs",
+                    []
+                )
 
-                    calculate_maiden(
-                        over,
-                        stats,
-                        registry
+                # ------------------------------------------------
+                # Process each over
+                # ------------------------------------------------
+
+                for over in overs:
+
+                    deliveries = over.get(
+                        "deliveries",
+                        []
                     )
 
-                    for delivery in over.get(
-                            "deliveries",
-                            []
-                    ):
+                    # ------------------------------------------------
+                    # Calculate maiden status for the over
+                    #
+                    # We do this before processing individual
+                    # delivery statistics.
+                    # ------------------------------------------------
 
-                        batter_name = delivery["batter"]
-                        bowler_name = delivery["bowler"]
+                    calculate_maiden_overs(
+                        deliveries,
+                        stats,
+                        player_ids
+                    )
 
-                        batter_id = registry.get(
-                            batter_name
+                    # ------------------------------------------------
+                    # Process deliveries
+                    # ------------------------------------------------
+
+                    for delivery in deliveries:
+
+                        batter_name = delivery.get(
+                            "batter"
                         )
 
-                        bowler_id = registry.get(
-                            bowler_name
+                        bowler_name = delivery.get(
+                            "bowler"
                         )
 
-                        if batter_id is None:
-                            raise ValueError(
-                                f"Missing registry ID for "
-                                f"batter {batter_name} "
-                                f"in {filename}"
-                            )
-
-                        if bowler_id is None:
-                            raise ValueError(
-                                f"Missing registry ID for "
-                                f"bowler {bowler_name} "
-                                f"in {filename}"
-                            )
-
-                        # -------------------------------------------------
-                        # Verify canonical identity exists
-                        # -------------------------------------------------
-
-                        if batter_id not in canonical_player_names:
-                            raise ValueError(
-                                f"Batter ID {batter_id} "
-                                f"({batter_name}) is missing "
-                                f"from players.csv"
-                            )
-
-                        if bowler_id not in canonical_player_names:
-                            raise ValueError(
-                                f"Bowler ID {bowler_id} "
-                                f"({bowler_name}) is missing "
-                                f"from players.csv"
-                            )
-
-                        # -----------------------------------------
+                        # ----------------------------------------
                         # Batting
-                        # -----------------------------------------
+                        # ----------------------------------------
 
                         calculate_batting(
                             delivery,
                             stats,
-                            registry
+                            player_ids
                         )
 
-                        player = stats[batter_id]
+                        if batter_name:
 
-                        player["team"] = batting_team
+                            batter_id = player_ids.get(
+                                batter_name
+                            )
 
-                        innings_batters.add(
-                            batter_id
-                        )
+                            if batter_id is None:
+                                raise ValueError(
+                                    f"No Cricsheet ID found "
+                                    f"for batter "
+                                    f"'{batter_name}' "
+                                    f"in {filename}"
+                                )
 
-                        # -----------------------------------------
+                            stats[batter_id][
+                                "team"
+                            ] = batting_team
+
+                            innings_batters.add(
+                                batter_id
+                            )
+
+                        # ----------------------------------------
                         # Bowling
-                        # -----------------------------------------
+                        # ----------------------------------------
 
                         calculate_bowling(
                             delivery,
                             stats,
-                            registry
+                            player_ids
                         )
 
-                        bowler = stats[bowler_id]
+                        if bowler_name:
 
-                        bowler["team"] = fielding_team
+                            bowler_id = player_ids.get(
+                                bowler_name
+                            )
 
-                        innings_bowlers.add(
-                            bowler_id
+                            if bowler_id is None:
+                                raise ValueError(
+                                    f"No Cricsheet ID found "
+                                    f"for bowler "
+                                    f"'{bowler_name}' "
+                                    f"in {filename}"
+                                )
+
+                            stats[bowler_id][
+                                "team"
+                            ] = fielding_team
+
+                            innings_bowlers.add(
+                                bowler_id
+                            )
+
+                        # ----------------------------------------
+                        # Dismissals
+                        # ----------------------------------------
+
+                        calculate_dismissal(
+                            delivery,
+                            stats,
+                            player_ids
                         )
 
-                        # -----------------------------------------
+                        # ----------------------------------------
                         # Fielding
-                        # -----------------------------------------
+                        # ----------------------------------------
 
                         calculate_fielding(
                             delivery,
                             stats,
-                            registry
+                            player_ids
                         )
 
-                        # Fielders belong to the fielding team.
-                        for wicket in delivery.get(
-                                "wickets",
-                                []
-                        ):
-
-                            for fielder in wicket.get(
-                                    "fielders",
-                                    []
-                            ):
-
-                                name = fielder.get("name")
-
-                                player_id = registry.get(
-                                    name
-                                )
-
-                                if player_id is None:
-                                    continue
-
-                                if player_id not in canonical_player_names:
-                                    raise ValueError(
-                                        f"Fielder ID {player_id} "
-                                        f"({name}) is missing "
-                                        f"from players.csv"
-                                    )
-
-                                stats[player_id]["team"] = (
-                                    fielding_team
-                                )
-
-                # ---------------------------------------------
-                # Mark innings participation
-                # ---------------------------------------------
+                # ------------------------------------------------
+                # Mark batting innings
+                # ------------------------------------------------
 
                 for player_id in innings_batters:
-                    stats[player_id]["batting_innings"] += 1
+
+                    stats[player_id][
+                        "batting_innings"
+                    ] += 1
+
+                # ------------------------------------------------
+                # Mark bowling innings
+                # ------------------------------------------------
 
                 for player_id in innings_bowlers:
-                    stats[player_id]["bowling_innings"] += 1
 
-            # -------------------------------------------------
-            # Generate player-match records
-            # -------------------------------------------------
+                    stats[player_id][
+                        "bowling_innings"
+                    ] += 1
+
+            # ----------------------------------------------------
+            # Build player-match records
+            # ----------------------------------------------------
 
             for player_id, player in stats.items():
 
-                # Every player appearing in a statistic must
-                # have a canonical identity.
+                # Resolve canonical name.
+                #
+                # This is the correct mapping variable:
+                #
+                # canonical_player_names
+                #
                 if player_id not in canonical_player_names:
+
                     raise ValueError(
-                        f"Player ID {player_id} "
-                        f"has no canonical identity"
+                        f"Player ID "
+                        f"{player_id} "
+                        f"is missing from "
+                        f"players.csv"
                     )
 
+                player_name = (
+                    canonical_player_names[
+                        player_id
+                    ]
+                )
+
+                # ------------------------------------------------
+                # Only output players who actually participated
+                # in the match.
+                #
+                # Fielding-only substitute players are included
+                # because they have catches/stumpings/run-outs.
+                # ------------------------------------------------
+
+                participated = (
+                        player["batting_innings"] > 0
+                        or player["bowling_innings"] > 0
+                        or player["catches"] > 0
+                        or player["stumpings"] > 0
+                        or player["run_outs"] > 0
+                        or player["dismissals"] > 0
+                )
+
+                if not participated:
+                    continue
+
                 records.append({
-                    "source_match_id": match_id,
-                    "season": season,
 
-                    "cricsheet_player_id": player_id,
+                    "source_match_id":
+                        match_id,
 
-                    # IMPORTANT:
-                    # Always use the canonical name from
-                    # players.csv.
+                    "season":
+                        season,
+
+                    "cricsheet_player_id":
+                        player_id,
+
                     "player_name":
-                        canonical_player_names[player_id],
+                        player_name,
 
-                    "team": player["team"],
+                    "team":
+                        player["team"],
 
+                    # Batting
                     "batting_innings":
                         player["batting_innings"],
 
@@ -587,6 +953,10 @@ def build_player_match_stats():
                     "sixes":
                         player["sixes"],
 
+                    "dismissals":
+                        player["dismissals"],
+
+                    # Bowling
                     "bowling_innings":
                         player["bowling_innings"],
 
@@ -602,6 +972,7 @@ def build_player_match_stats():
                     "maidens":
                         player["maidens"],
 
+                    # Fielding
                     "catches":
                         player["catches"],
 
@@ -612,37 +983,69 @@ def build_player_match_stats():
                         player["run_outs"],
                 })
 
-                # -------------------------------------------------
+                # ------------------------------------------------
                 # Validation totals
-                # -------------------------------------------------
+                # ------------------------------------------------
 
-                total_batting_runs += player["runs"]
-                total_balls_faced += player["balls_faced"]
-
-                total_bowling_runs += player[
-                    "runs_conceded"
-                ]
-
-                total_balls_bowled += player[
-                    "balls_bowled"
-                ]
-
-                total_wickets += player["wickets"]
-                total_maidens += player["maidens"]
-
-                total_catches += player["catches"]
-                total_stumpings += player["stumpings"]
-                total_run_outs += player["run_outs"]
-
-            if index % 100 == 0:
-                print(
-                    f"Processed "
-                    f"{index}/{len(json_files)} matches"
+                total_batting_runs += (
+                    player["runs"]
                 )
 
-    # ---------------------------------------------------------
-    # Write CSV
-    # ---------------------------------------------------------
+                total_balls_faced += (
+                    player["balls_faced"]
+                )
+
+                total_fours += (
+                    player["fours"]
+                )
+
+                total_sixes += (
+                    player["sixes"]
+                )
+
+                total_dismissals += (
+                    player["dismissals"]
+                )
+
+                total_bowling_runs += (
+                    player["runs_conceded"]
+                )
+
+                total_legal_balls += (
+                    player["balls_bowled"]
+                )
+
+                total_bowler_wickets += (
+                    player["wickets"]
+                )
+
+                total_maidens += (
+                    player["maidens"]
+                )
+
+                total_catches += (
+                    player["catches"]
+                )
+
+                total_stumpings += (
+                    player["stumpings"]
+                )
+
+                total_run_outs += (
+                    player["run_outs"]
+                )
+
+            if index % 100 == 0:
+
+                print(
+                    f"Processed "
+                    f"{index}/"
+                    f"{len(json_files)} matches"
+                )
+
+    # ========================================================
+    # WRITE CSV
+    # ========================================================
 
     fieldnames = [
         "source_match_id",
@@ -652,18 +1055,22 @@ def build_player_match_stats():
         "player_name",
         "team",
 
+        # Batting
         "batting_innings",
         "runs",
         "balls_faced",
         "fours",
         "sixes",
+        "dismissals",
 
+        # Bowling
         "bowling_innings",
         "runs_conceded",
         "balls_bowled",
         "wickets",
         "maidens",
 
+        # Fielding
         "catches",
         "stumpings",
         "run_outs",
@@ -682,11 +1089,18 @@ def build_player_match_stats():
         )
 
         writer.writeheader()
-        writer.writerows(records)
 
-    # ---------------------------------------------------------
-    # Validation report
-    # ---------------------------------------------------------
+        writer.writerows(
+            records
+        )
+
+    # ========================================================
+    # VALIDATION REPORT
+    # ========================================================
+
+    total_player_match_records = len(
+        records
+    )
 
     with open(
             VALIDATION_FILE,
@@ -704,12 +1118,12 @@ def build_player_match_stats():
 
         file.write(
             f"Matches processed: "
-            f"{len(json_files)}\n"
+            f"{total_matches}\n"
         )
 
         file.write(
             f"Player-match records: "
-            f"{len(records)}\n"
+            f"{total_player_match_records}\n"
         )
 
         file.write(
@@ -723,18 +1137,23 @@ def build_player_match_stats():
         )
 
         file.write(
+            f"Total batting dismissals: "
+            f"{total_dismissals}\n"
+        )
+
+        file.write(
             f"Total bowling runs conceded: "
             f"{total_bowling_runs}\n"
         )
 
         file.write(
             f"Total legal balls bowled: "
-            f"{total_balls_bowled}\n"
+            f"{total_legal_balls}\n"
         )
 
         file.write(
             f"Total bowling wickets credited: "
-            f"{total_wickets}\n"
+            f"{total_bowler_wickets}\n"
         )
 
         file.write(
@@ -757,9 +1176,9 @@ def build_player_match_stats():
             f"{total_run_outs}\n"
         )
 
-    # ---------------------------------------------------------
-    # Console summary
-    # ---------------------------------------------------------
+    # ========================================================
+    # CONSOLE OUTPUT
+    # ========================================================
 
     print("\n" + "=" * 70)
     print("PLAYER-MATCH STATISTICS GENERATED")
@@ -767,12 +1186,12 @@ def build_player_match_stats():
 
     print(
         f"Matches processed: "
-        f"{len(json_files)}"
+        f"{total_matches}"
     )
 
     print(
         f"Player-match records: "
-        f"{len(records)}"
+        f"{total_player_match_records}"
     )
 
     print(
@@ -786,18 +1205,33 @@ def build_player_match_stats():
     )
 
     print(
+        f"Total batting dismissals: "
+        f"{total_dismissals}"
+    )
+
+    print(
+        f"Total fours: "
+        f"{total_fours}"
+    )
+
+    print(
+        f"Total sixes: "
+        f"{total_sixes}"
+    )
+
+    print(
         f"Total bowling runs conceded: "
         f"{total_bowling_runs}"
     )
 
     print(
         f"Total legal balls bowled: "
-        f"{total_balls_bowled}"
+        f"{total_legal_balls}"
     )
 
     print(
         f"Bowler wickets credited: "
-        f"{total_wickets}"
+        f"{total_bowler_wickets}"
     )
 
     print(
@@ -820,10 +1254,10 @@ def build_player_match_stats():
         f"{total_run_outs}"
     )
 
-    print(f"\nOutput:")
+    print("\nOutput:")
     print(OUTPUT_FILE)
 
-    print(f"\nValidation:")
+    print("\nValidation:")
     print(VALIDATION_FILE)
 
 
