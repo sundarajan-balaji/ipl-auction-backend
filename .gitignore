@@ -31,3 +31,18 @@ build/
 
 ### VS Code ###
 .vscode/
+
+# Python virtual environment
+data/.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Raw IPL data
+data/raw/cricsheet/*
+!data/raw/cricsheet/.gitkeep
+
+# Generated/processed data
+data/processed/*
+!data/processed/.gitkeep

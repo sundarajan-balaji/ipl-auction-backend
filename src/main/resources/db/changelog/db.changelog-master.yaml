@@ -1,3 +1,33 @@
 databaseChangeLog:
   - include:
       file: db/changelog/changes/001-create-users.sql
+
+  - include:
+      file: db/changelog/changes/002-create-players.sql
+
+  - include:
+      file: db/changelog/changes/003-create-teams.sql
+
+  - include:
+      file: db/changelog/changes/004-create-team-aliases.sql
+
+  - include:
+      file: db/changelog/changes/005-seed-teams.sql
+
+  - include:
+      file: db/changelog/changes/006-seed-team-aliases.sql
+
+  - include:
+      file: db/changelog/changes/007-create-venues.sql
+
+  - include:
+      file: db/changelog/changes/008-create-venue-aliases.sql
+
+  - include:
+      file: db/changelog/changes/009-seed-venues.sql
+
+  - include:
+      file: db/changelog/changes/010-seed-venue-aliases.sql
+
+  - include:
+      file: db/changelog/changes/011-create-matches.sql
