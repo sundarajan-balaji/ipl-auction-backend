@@ -269,11 +269,15 @@ def calculate_dismissal(
         delivery,
         stats,
         player_ids,
+        batting_team,
 ):
     """
     Count batting dismissals.
 
     Retired hurt is deliberately excluded.
+
+    The dismissed player belongs to the batting team
+    for the innings.
     """
 
     for wicket in delivery.get(
@@ -307,14 +311,21 @@ def calculate_dismissal(
             "dismissals"
         ] += 1
 
+        stats[player_id][
+            "team"
+        ] = batting_team
+
 
 def calculate_fielding(
         delivery,
         stats,
         player_ids,
+        fielding_team,
 ):
     """
     Calculate catches, stumpings and unambiguous run-outs.
+
+    Also assigns the player's team to the fielding team.
 
     Important:
 
@@ -368,6 +379,10 @@ def calculate_fielding(
                     "catches"
                 ] += 1
 
+                stats[player_id][
+                    "team"
+                ] = fielding_team
+
         # ----------------------------------------------------
         # Stumpings
         # ----------------------------------------------------
@@ -397,13 +412,17 @@ def calculate_fielding(
                     "stumpings"
                 ] += 1
 
+                stats[player_id][
+                    "team"
+                ] = fielding_team
+
         # ----------------------------------------------------
         # Run outs
         #
         # Only assign when exactly one fielder is supplied.
         #
         # If multiple fielders are supplied, we cannot
-        # unambiguously decide who gets the fielding credit.
+        # unambiguously decide who gets the run-out credit.
         # ----------------------------------------------------
 
         elif kind == "run out":
@@ -431,6 +450,10 @@ def calculate_fielding(
             stats[player_id][
                 "run_outs"
             ] += 1
+
+            stats[player_id][
+                "team"
+            ] = fielding_team
 
 
 def calculate_maiden_overs(
@@ -840,7 +863,8 @@ def build_player_match_stats():
                         calculate_dismissal(
                             delivery,
                             stats,
-                            player_ids
+                            player_ids,
+                            batting_team
                         )
 
                         # ----------------------------------------
@@ -850,7 +874,8 @@ def build_player_match_stats():
                         calculate_fielding(
                             delivery,
                             stats,
-                            player_ids
+                            player_ids,
+                            fielding_team
                         )
 
                 # ------------------------------------------------
