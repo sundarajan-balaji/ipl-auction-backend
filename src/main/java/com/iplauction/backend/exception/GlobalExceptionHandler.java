@@ -18,4 +18,15 @@ public class GlobalExceptionHandler {
                 "message", exception.getMessage()
         );
     }
+
+    @ExceptionHandler(DuplicateResourceException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public Map<String, String> handleDuplicateResource(
+            DuplicateResourceException exception) {
+
+        return Map.of(
+                "error", "Resource Already Exists",
+                "message", exception.getMessage()
+        );
+    }
 }
