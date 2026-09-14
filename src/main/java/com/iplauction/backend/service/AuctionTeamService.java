@@ -10,6 +10,7 @@ import com.iplauction.backend.repository.AuctionRepository;
 import com.iplauction.backend.repository.AuctionTeamRepository;
 import com.iplauction.backend.repository.TeamRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -22,6 +23,7 @@ public class AuctionTeamService {
     private final TeamRepository teamRepository;
     private final AuctionTeamRepository auctionTeamRepository;
 
+    @PreAuthorize("hasRole('ADMIN')")
     public AuctionTeamResponse addTeamToAuction(Long auctionId, Long teamId) {
         Auction auction = auctionRepository.findById(auctionId)
                 .orElseThrow(() -> new ResourceNotFoundException("Auction not found with id: " + auctionId));

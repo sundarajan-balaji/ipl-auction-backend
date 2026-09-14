@@ -24,11 +24,18 @@ public class Auction {
     @Column(nullable = false)
     private String season;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "current_player_id")
+    private AuctionPlayer currentPlayer;
+
     @Column(nullable = false)
     private String status;
 
     @Column(name = "starting_purse", nullable = false)
     private Long startingPurse;
+
+    @Column(name = "bid_increment", nullable = false)
+    private Long bidIncrement;
 
     @Column(name = "created_at", nullable = false)
     private OffsetDateTime createdAt;

@@ -43,3 +43,18 @@ databaseChangeLog:
 
   - include:
       file: db/changelog/changes/015-create-auction-players.sql
+
+  - include:
+      file: db/changelog/changes/016-add-user-role.sql
+
+  - include:
+      file: db/changelog/changes/017-add-auction-player-order.sql
+
+  - include:
+      file: db/changelog/changes/018-create-auction-bids.sql
+
+  - include:
+      file: db/changelog/changes/019-add-current-player-to-auctions.sql
+
+  - include:
+      file: db/changelog/changes/020-add-bid-increment-to-auctions.sql

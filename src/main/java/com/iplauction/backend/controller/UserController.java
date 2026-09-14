@@ -13,6 +13,9 @@ public class UserController {
     public Map<String, Object> getCurrentUser(
             @AuthenticationPrincipal OAuth2User user) {
 
-        return user.getAttributes();
+        return Map.of(
+                "attributes", user.getAttributes(),
+                "authorities", user.getAuthorities()
+        );
     }
 }

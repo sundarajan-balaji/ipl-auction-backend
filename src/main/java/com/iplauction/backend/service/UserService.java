@@ -1,6 +1,7 @@
 package com.iplauction.backend.service;
 
 import com.iplauction.backend.entity.User;
+import com.iplauction.backend.entity.UserRole;
 import com.iplauction.backend.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.oauth2.core.user.OAuth2User;
@@ -34,6 +35,7 @@ public class UserService {
                 .email(oauthUser.getAttribute("email"))
                 .displayName(oauthUser.getAttribute("name"))
                 .avatarUrl(oauthUser.getAttribute("picture"))
+                .role(UserRole.VIEWER)
                 .createdAt(now)
                 .updatedAt(now)
                 .build();

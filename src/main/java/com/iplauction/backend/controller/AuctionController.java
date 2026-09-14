@@ -21,7 +21,8 @@ public class AuctionController {
         return auctionService.createAuction(
                 request.name(),
                 request.season(),
-                request.startingPurse()
+                request.startingPurse(),
+                request.bidIncrement()
         );
     }
 
@@ -48,5 +49,20 @@ public class AuctionController {
     @PostMapping("/{id}/complete")
     public AuctionResponse completeAuction(@PathVariable Long id) {
         return auctionService.completeAuction(id);
+    }
+
+    @PostMapping("/{id}/next-player")
+    public AuctionResponse moveToNextPlayer(@PathVariable Long id) {
+        return auctionService.moveToNextPlayer(id);
+    }
+
+    @PostMapping("/{id}/sell")
+    public AuctionResponse sellCurrentPlayer(@PathVariable Long id) {
+        return auctionService.sellCurrentPlayer(id);
+    }
+
+    @PostMapping("/{id}/unsold")
+    public AuctionResponse markCurrentPlayerUnsold(@PathVariable Long id) {
+        return auctionService.markCurrentPlayerUnsold(id);
     }
 }

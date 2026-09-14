@@ -47,6 +47,9 @@ public class AuctionPlayer {
     @Column(name = "sold_price")
     private Long soldPrice;
 
+    @Column(name = "auction_order")
+    private Integer auctionOrder;
+
     @Column(name = "created_at", nullable = false)
     private OffsetDateTime createdAt;
 

@@ -1,17 +1,19 @@
 package com.iplauction.backend.config;
 
-import com.iplauction.backend.service.UserService;
+import com.iplauction.backend.service.CustomOidcUserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.web.SecurityFilterChain;
 
 @Configuration
+@EnableMethodSecurity
 @RequiredArgsConstructor
 public class SecurityConfig {
 
-    private final UserService userService;
+    private final CustomOidcUserService customOidcUserService;
 
     @Bean
     SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
@@ -30,13 +32,10 @@ public class SecurityConfig {
                         .anyRequest().authenticated()
                 )
                 .oauth2Login(oauth -> oauth
+                        .userInfoEndpoint(userInfo -> userInfo
+                                .oidcUserService(customOidcUserService)
+                        )
                         .successHandler((request, response, authentication) -> {
-
-                            userService.processOAuthUser(
-                                    (org.springframework.security.oauth2.core.user.OAuth2User)
-                                            authentication.getPrincipal()
-                            );
-
                             response.sendRedirect("/api/me");
                         })
                 );

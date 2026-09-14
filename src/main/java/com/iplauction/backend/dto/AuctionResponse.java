@@ -5,5 +5,10 @@ public record AuctionResponse(
         String name,
         String season,
         String status,
-        Long startingPurse
+        Long startingPurse,
+        Long bidIncrement,
+        Long currentPlayerId,
+        String currentPlayerName,
+        Long currentPlayerBasePrice,
+        String currentPlayerStatus
 ) {}

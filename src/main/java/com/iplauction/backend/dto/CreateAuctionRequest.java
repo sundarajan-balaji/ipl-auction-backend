@@ -14,5 +14,9 @@ public record CreateAuctionRequest(
 
         @NotNull
         @Positive
-        Long startingPurse
+        Long startingPurse,
+
+        @NotNull
+        @Positive
+        Long bidIncrement
 ) {}

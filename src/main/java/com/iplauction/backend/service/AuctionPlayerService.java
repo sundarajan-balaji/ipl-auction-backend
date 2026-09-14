@@ -10,6 +10,7 @@ import com.iplauction.backend.repository.AuctionPlayerRepository;
 import com.iplauction.backend.repository.AuctionRepository;
 import com.iplauction.backend.repository.PlayerRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -22,6 +23,7 @@ public class AuctionPlayerService {
     private final PlayerRepository playerRepository;
     private final AuctionPlayerRepository auctionPlayerRepository;
 
+    @PreAuthorize("hasRole('ADMIN')")
     public AuctionPlayerResponse addPlayerToAuction(Long auctionId, Long playerId, Long basePrice) {
         Auction auction = auctionRepository.findById(auctionId)
                 .orElseThrow(() -> new ResourceNotFoundException("Auction not found with id: " + auctionId));
@@ -33,11 +35,14 @@ public class AuctionPlayerService {
             throw new DuplicateResourceException("Player is already participating in this auction");
         }
 
+        int nextOrder = auctionPlayerRepository.findMaxAuctionOrderByAuctionId(auctionId) + 1;
+
         AuctionPlayer auctionPlayer = AuctionPlayer.builder()
                 .auction(auction)
                 .player(player)
                 .basePrice(basePrice)
                 .status("REGISTERED")
+                .auctionOrder(nextOrder)
                 .soldToAuctionTeam(null)
                 .soldPrice(null)
                 .build();
