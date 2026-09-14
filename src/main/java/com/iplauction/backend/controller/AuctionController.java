@@ -34,4 +34,19 @@ public class AuctionController {
     public AuctionResponse getAuctionById(@PathVariable Long id) {
         return auctionService.getAuctionById(id);
     }
+
+    @PostMapping("/{id}/ready")
+    public AuctionResponse markAuctionReady(@PathVariable Long id) {
+        return auctionService.markAuctionReady(id);
+    }
+
+    @PostMapping("/{id}/start")
+    public AuctionResponse startAuction(@PathVariable Long id) {
+        return auctionService.startAuction(id);
+    }
+
+    @PostMapping("/{id}/complete")
+    public AuctionResponse completeAuction(@PathVariable Long id) {
+        return auctionService.completeAuction(id);
+    }
 }

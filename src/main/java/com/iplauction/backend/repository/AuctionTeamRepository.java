@@ -8,4 +8,5 @@ import java.util.List;
 public interface AuctionTeamRepository extends JpaRepository<AuctionTeam, Long> {
     boolean existsByAuctionIdAndTeamId(Long auctionId, Long teamId);
     List<AuctionTeam> findByAuctionId(Long auctionId);
+    long countByAuctionId(Long auctionId);
 }

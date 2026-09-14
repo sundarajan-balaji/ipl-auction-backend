@@ -10,8 +10,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(ResourceNotFoundException.class)
     @ResponseStatus(HttpStatus.NOT_FOUND)
-    public Map<String, String> handleResourceNotFound(
-            ResourceNotFoundException exception) {
+    public Map<String, String> handleResourceNotFound(ResourceNotFoundException exception) {
 
         return Map.of(
                 "error", "Resource Not Found",
@@ -21,11 +20,19 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(DuplicateResourceException.class)
     @ResponseStatus(HttpStatus.CONFLICT)
-    public Map<String, String> handleDuplicateResource(
-            DuplicateResourceException exception) {
+    public Map<String, String> handleDuplicateResource(DuplicateResourceException exception) {
 
         return Map.of(
                 "error", "Resource Already Exists",
+                "message", exception.getMessage()
+        );
+    }
+    @ExceptionHandler(InvalidAuctionStateException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public Map<String, String> handleInvalidAuctionState(InvalidAuctionStateException exception) {
+
+        return Map.of(
+                "error", "Invalid Auction State",
                 "message", exception.getMessage()
         );
     }

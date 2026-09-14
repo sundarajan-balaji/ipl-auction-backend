@@ -9,4 +9,5 @@ public interface AuctionPlayerRepository extends JpaRepository<AuctionPlayer, Lo
 
     boolean existsByAuctionIdAndPlayerId(Long auctionId, Long playerId);
     List<AuctionPlayer> findByAuctionId(Long auctionId);
+    long countByAuctionId(Long auctionId);
 }
